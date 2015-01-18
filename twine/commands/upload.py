@@ -15,6 +15,7 @@ from __future__ import absolute_import, division, print_function
 from __future__ import unicode_literals
 
 import argparse
+import glob
 import hashlib
 import os.path
 import subprocess
@@ -29,18 +30,21 @@ import pkginfo
 import pkg_resources
 import requests
 
+from twine.utils import get_config, get_username, get_password
 from twine.wheel import Wheel
-from twine.utils import get_config
+from twine.wininst import WinInst
 
 
 DIST_TYPES = {
     "bdist_wheel": Wheel,
+    "bdist_wininst": WinInst,
     "bdist_egg": pkginfo.BDist,
     "sdist": pkginfo.SDist,
 }
 
 DIST_EXTENSIONS = {
     ".whl": "bdist_wheel",
+    ".exe": "bdist_wininst",
     ".egg": "bdist_egg",
     ".tar.bz2": "sdist",
     ".tar.gz": "sdist",
@@ -48,7 +52,34 @@ DIST_EXTENSIONS = {
 }
 
 
-def upload(dists, repository, sign, identity, username, password, comment):
+def find_dists(dists):
+    uploads = []
+    for filename in dists:
+        if os.path.exists(filename):
+            uploads.append(filename)
+            continue
+        # The filename didn't exist so it may be a glob
+        files = glob.glob(filename)
+        # If nothing matches, files is []
+        if not files:
+            raise ValueError(
+                "Cannot find file (or expand pattern): '%s'" % filename
+                )
+        # Otherwise, files will be filenames that exist
+        uploads.extend(files)
+    return uploads
+
+
+def sign_file(sign_with, filename, identity):
+    print("Signing {0}".format(os.path.basename(filename)))
+    gpg_args = [sign_with, "--detach-sign", "-a", filename]
+    if identity:
+        gpg_args[2:2] = ["--local-user", identity]
+    subprocess.check_call(gpg_args)
+
+
+def upload(dists, repository, sign, identity, username, password, comment,
+           sign_with):
     # Check that a nonsensical option wasn't given
     if not sign and identity:
         raise ValueError("sign must be given along with identity")
@@ -77,16 +108,17 @@ def upload(dists, repository, sign, identity, username, password, comment):
 
     print("Uploading distributions to {0}".format(config["repository"]))
 
+    username = get_username(username, config)
+    password = get_password(password, config)
+
     session = requests.session()
 
-    for filename in dists:
+    uploads = find_dists(dists)
+
+    for filename in uploads:
         # Sign the dist if requested
         if sign:
-            print("Signing {0}".format(os.path.basename(filename)))
-            gpg_args = ["gpg", "--detach-sign", "-a", filename]
-            if identity:
-                gpg_args[2:2] = ["--local-user", identity]
-            subprocess.check_call(gpg_args)
+            sign_file(sign_with, filename, identity)
 
         # Extract the metadata from the package
         for ext, dtype in DIST_EXTENSIONS.items():
@@ -104,6 +136,8 @@ def upload(dists, repository, sign, identity, username, password, comment):
             py_version = pkgd.py_version
         elif dtype == "bdist_wheel":
             py_version = meta.py_version
+        elif dtype == "bdist_wininst":
+            py_version = meta.py_version
         else:
             py_version = None
 
@@ -115,7 +149,7 @@ def upload(dists, repository, sign, identity, username, password, comment):
             "protcol_version": "1",
 
             # identify release
-            "name": meta.name,
+            "name": pkg_resources.safe_name(meta.name),
             "version": meta.version,
 
             # file content
@@ -175,22 +209,32 @@ def upload(dists, repository, sign, identity, username, password, comment):
             config["repository"],
             data=dict((k, v) for k, v in data.items() if v),
             files=filedata,
-            auth=(config.get("username"), config.get("password")),
+            auth=(username, password),
         )
+        # Bug 28. Try to silence a ResourceWarning by releasing the socket and
+        # clearing the connection pool.
+        resp.close()
+        session.close()
         resp.raise_for_status()
 
 
-def main():
+def main(args):
     parser = argparse.ArgumentParser(prog="twine upload")
     parser.add_argument(
         "-r", "--repository",
-        help="The repository to upload the files to",
+        default="pypi",
+        help="The repository to upload the files to (default: %(default)s)",
     )
     parser.add_argument(
         "-s", "--sign",
         action="store_true",
         default=False,
         help="Sign files to upload using gpg",
+    )
+    parser.add_argument(
+        "--sign-with",
+        default="gpg",
+        help="GPG program used to sign uploads (default: %(default)s)",
     )
     parser.add_argument(
         "-i", "--identity",
@@ -217,18 +261,13 @@ def main():
              "signature with the file upload",
     )
 
-    args = parser.parse_args(sys.argv[1:])
+    args = parser.parse_args(args)
 
     # Call the upload function with the arguments from the command line
     try:
-        upload(
-            *args._get_args(),
-            **dict(
-                (k, v) for k, v in args._get_kwargs() if not k.startswith("_")
-            )
-        )
+        upload(**vars(args))
     except Exception as exc:
-        sys.exit("{0}: {1}".format(exc.__class__.__name__, exc.message))
+        sys.exit("{exc.__class__.__name__}: {exc}".format(exc=exc))
 
 
 if __name__ == "__main__":
