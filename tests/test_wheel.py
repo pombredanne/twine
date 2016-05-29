@@ -1,4 +1,4 @@
-# Copyright 2013 Donald Stufft
+# Copyright 2015 Ian Cordasco
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,22 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import absolute_import, division, print_function
 from __future__ import unicode_literals
 
-__all__ = (
-    "__title__", "__summary__", "__uri__", "__version__", "__author__",
-    "__email__", "__license__", "__copyright__",
-)
+from twine import wheel
 
-__title__ = "twine"
-__summary__ = "Collection of utilities for interacting with PyPI"
-__uri__ = "https://github.com/pypa/twine"
+import pytest
 
-__version__ = "1.6.5"
 
-__author__ = "Donald Stufft and individual contributors"
-__email__ = "donald@stufft.io"
+@pytest.fixture(params=[
+    'tests/fixtures/twine-1.5.0-py2.py3-none-any.whl',
+    'tests/alt-fixtures/twine-1.5.0-py2.py3-none-any.whl'
+])
+def example_wheel(request):
+    return wheel.Wheel(request.param)
 
-__license__ = "Apache License, Version 2.0"
-__copyright__ = "Copyright 2013 Donald Stufft"
+
+def test_version_parsing(example_wheel):
+    assert example_wheel.py_version == 'py2.py3'

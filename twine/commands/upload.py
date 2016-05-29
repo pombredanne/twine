@@ -16,40 +16,23 @@ from __future__ import unicode_literals
 
 import argparse
 import glob
-import hashlib
 import os.path
-import subprocess
 import sys
 
-try:
-    from urlparse import urlparse, urlunparse
-except ImportError:
-    from urllib.parse import urlparse, urlunparse
-
-import pkginfo
-import pkg_resources
-import requests
-
-from twine.utils import get_config, get_username, get_password
-from twine.wheel import Wheel
-from twine.wininst import WinInst
+import twine.exceptions as exc
+from twine.package import PackageFile
+from twine.repository import Repository
+from twine import utils
 
 
-DIST_TYPES = {
-    "bdist_wheel": Wheel,
-    "bdist_wininst": WinInst,
-    "bdist_egg": pkginfo.BDist,
-    "sdist": pkginfo.SDist,
-}
+def group_wheel_files_first(files):
+    if not any(fname for fname in files if fname.endswith(".whl")):
+        # Return early if there's no wheel files
+        return files
 
-DIST_EXTENSIONS = {
-    ".whl": "bdist_wheel",
-    ".exe": "bdist_wininst",
-    ".egg": "bdist_egg",
-    ".tar.bz2": "sdist",
-    ".tar.gz": "sdist",
-    ".zip": "sdist",
-}
+    files.sort(key=lambda x: -1 if x.endswith(".whl") else 0)
+
+    return files
 
 
 def find_dists(dists):
@@ -67,155 +50,86 @@ def find_dists(dists):
                 )
         # Otherwise, files will be filenames that exist
         uploads.extend(files)
-    return uploads
+    return group_wheel_files_first(uploads)
 
 
-def sign_file(sign_with, filename, identity):
-    print("Signing {0}".format(os.path.basename(filename)))
-    gpg_args = [sign_with, "--detach-sign", "-a", filename]
-    if identity:
-        gpg_args[2:2] = ["--local-user", identity]
-    subprocess.check_call(gpg_args)
+def skip_upload(response, skip_existing, package):
+    filename = package.basefilename
+    msg = 'A file named "{0}" already exists for'.format(filename)
+    # NOTE(sigmavirus24): PyPI presently returns a 400 status code with the
+    # error message in the reason attribute. Other implementations return a
+    # 409 status code. We only want to skip an upload if:
+    # 1. The user has told us to skip existing packages (skip_existing is
+    #    True) AND
+    # 2. a) The response status code is 409 OR
+    # 2. b) The response status code is 400 AND it has a reason that matches
+    #       what we expect PyPI to return to us.
+    return (skip_existing and (response.status_code == 409 or
+            (response.status_code == 400 and response.reason.startswith(msg))))
 
 
 def upload(dists, repository, sign, identity, username, password, comment,
-           sign_with):
+           sign_with, config_file, skip_existing, cert, client_cert):
     # Check that a nonsensical option wasn't given
     if not sign and identity:
         raise ValueError("sign must be given along with identity")
+
+    dists = find_dists(dists)
 
     # Determine if the user has passed in pre-signed distributions
     signatures = dict(
         (os.path.basename(d), d) for d in dists if d.endswith(".asc")
     )
-    dists = [i for i in dists if not i.endswith(".asc")]
+    uploads = [i for i in dists if not i.endswith(".asc")]
 
-    # Get our config from ~/.pypirc
-    try:
-        config = get_config()[repository]
-    except KeyError:
-        raise KeyError(
-            "Missing '{0}' section from the configuration file".format(
-                repository,
-            ),
-        )
+    config = utils.get_repository_from_config(config_file, repository)
 
-    parsed = urlparse(config["repository"])
-    if parsed.netloc in ["pypi.python.org", "testpypi.python.org"]:
-        config["repository"] = urlunparse(
-            ("https",) + parsed[1:]
-        )
+    config["repository"] = utils.normalize_repository_url(
+        config["repository"]
+    )
 
     print("Uploading distributions to {0}".format(config["repository"]))
 
-    username = get_username(username, config)
-    password = get_password(password, config)
+    username = utils.get_username(username, config)
+    password = utils.get_password(password, config)
+    ca_cert = utils.get_cacert(cert, config)
+    client_cert = utils.get_clientcert(client_cert, config)
 
-    session = requests.session()
-
-    uploads = find_dists(dists)
+    repository = Repository(config["repository"], username, password)
+    repository.set_certificate_authority(ca_cert)
+    repository.set_client_certificate(client_cert)
 
     for filename in uploads:
-        # Sign the dist if requested
-        if sign:
-            sign_file(sign_with, filename, identity)
+        package = PackageFile.from_filename(filename, comment)
 
-        # Extract the metadata from the package
-        for ext, dtype in DIST_EXTENSIONS.items():
-            if filename.endswith(ext):
-                meta = DIST_TYPES[dtype](filename)
-                break
-        else:
-            raise ValueError(
-                "Unknown distribution format: '%s'" %
-                os.path.basename(filename)
-            )
+        if repository.package_is_uploaded(package) and skip_existing:
+            print("  Skipping {0} because it appears to already exist".format(
+                package.basefilename))
+            continue
 
-        if dtype == "bdist_egg":
-            pkgd = pkg_resources.Distribution.from_filename(filename)
-            py_version = pkgd.py_version
-        elif dtype == "bdist_wheel":
-            py_version = meta.py_version
-        elif dtype == "bdist_wininst":
-            py_version = meta.py_version
-        else:
-            py_version = None
-
-        # Fill in the data - send all the meta-data in case we need to
-        # register a new release
-        data = {
-            # action
-            ":action": "file_upload",
-            "protcol_version": "1",
-
-            # identify release
-            "name": pkg_resources.safe_name(meta.name),
-            "version": meta.version,
-
-            # file content
-            "filetype": dtype,
-            "pyversion": py_version,
-
-            # additional meta-data
-            "metadata_version": meta.metadata_version,
-            "summary": meta.summary,
-            "home_page": meta.home_page,
-            "author": meta.author,
-            "author_email": meta.author_email,
-            "maintainer": meta.maintainer,
-            "maintainer_email": meta.maintainer_email,
-            "license": meta.license,
-            "description": meta.description,
-            "keywords": meta.keywords,
-            "platform": meta.platforms,
-            "classifiers": meta.classifiers,
-            "download_url": meta.download_url,
-            "supported_platform": meta.supported_platforms,
-            "comment": comment,
-
-            # PEP 314
-            "provides": meta.provides,
-            "requires": meta.requires,
-            "obsoletes": meta.obsoletes,
-
-            # Metadata 1.2
-            "project_urls": meta.project_urls,
-            "provides_dist": meta.provides_dist,
-            "obsoletes_dist": meta.obsoletes_dist,
-            "requires_dist": meta.requires_dist,
-            "requires_external": meta.requires_external,
-            "requires_python": meta.requires_python,
-
-        }
-
-        with open(filename, "rb") as fp:
-            content = fp.read()
-            filedata = {
-                "content": (os.path.basename(filename), content),
-            }
-            data["md5_digest"] = hashlib.md5(content).hexdigest()
-
-        signed_name = os.path.basename(filename) + ".asc"
+        signed_name = package.signed_basefilename
         if signed_name in signatures:
-            with open(signatures[signed_name], "rb") as gpg:
-                filedata["gpg_signature"] = (signed_name, gpg.read())
+            package.add_gpg_signature(signatures[signed_name], signed_name)
         elif sign:
-            with open(filename + ".asc", "rb") as gpg:
-                filedata["gpg_signature"] = (signed_name, gpg.read())
+            package.sign(sign_with, identity)
 
-        print("Uploading {0}".format(os.path.basename(filename)))
+        resp = repository.upload(package)
 
-        resp = session.post(
-            config["repository"],
-            data=dict((k, v) for k, v in data.items() if v),
-            files=filedata,
-            auth=(username, password),
-        )
-        # Bug 28. Try to silence a ResourceWarning by releasing the socket and
-        # clearing the connection pool.
-        resp.close()
-        session.close()
+        # Bug 92. If we get a redirect we should abort because something seems
+        # funky. The behaviour is not well defined and redirects being issued
+        # by PyPI should never happen in reality. This should catch malicious
+        # redirects as well.
+        if resp.is_redirect:
+            raise exc.RedirectDetected(
+                ('"{0}" attempted to redirect to "{1}" during upload.'
+                 ' Aborting...').format(config["repository"],
+                                        resp.headers["location"]))
+
         resp.raise_for_status()
+
+    # Bug 28. Try to silence a ResourceWarning by clearing the connection
+    # pool.
+    repository.close()
 
 
 def main(args):
@@ -251,6 +165,28 @@ def main(args):
     parser.add_argument(
         "-c", "--comment",
         help="The comment to include with the distribution file",
+    )
+    parser.add_argument(
+        "--config-file",
+        default="~/.pypirc",
+        help="The .pypirc config file to use",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        default=False,
+        action="store_true",
+        help="Continue uploading files if one already exists",
+    )
+    parser.add_argument(
+        "--cert",
+        metavar="path",
+        help="Path to alternate CA bundle",
+    )
+    parser.add_argument(
+        "--client-cert",
+        metavar="path",
+        help="Path to SSL client certificate, a single file containing the "
+             "private key and the certificate in PEM forma",
     )
     parser.add_argument(
         "dists",

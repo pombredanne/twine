@@ -3,17 +3,19 @@ twine
 
 Twine is a utility for interacting `with PyPI <https://pypi.python.org/pypi/twine>`_.
 
-Currently it only supports uploading distributions.
+Currently it only supports registering projects and uploading distributions.
 
 
 Why Should I Use This?
 ----------------------
 
-The biggest reason to use twine is that ``python setup.py upload`` `authenticates you to PyPI 
-over http <http://bugs.python.org/issue12226>`_. 
-This means anytime you use it you expose your username
-and password to being sniffed. Twine uses only verified TLS to upload to PyPI
-protecting your credentials from theft.
+The biggest reason to use twine is that it securely authenticates you to PyPI
+over HTTPS using a verified connection while ``python setup.py upload`` `only
+recently stopped using HTTP <http://bugs.python.org/issue12226>`_ in Python
+2.7.9+ and Python 3.2+. This means anytime you use ``python setup.py upload``
+with an older Python version, you expose your username and password to being
+easily sniffed. Twine uses only verified TLS to upload to PyPI protecting your
+credentials from theft.
 
 Secondly it allows you to precreate your distribution files.
 ``python setup.py upload`` only allows you to upload something that you've
@@ -52,17 +54,24 @@ Usage
 
 1. Create some distributions in the normal way:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-    $ python setup.py sdist bdist_wheel
+       $ python setup.py sdist bdist_wheel
 
-2. Upload with twine:
+2. Register your project (if necessary):
+ 
+   .. code-block:: bash
 
-.. code-block:: bash
+       $ twine register dist/* 
 
-    $ twine upload dist/*
 
-3. Done!
+3. Upload with twine:
+
+   .. code-block:: bash
+
+       $ twine upload dist/*
+
+4. Done!
 
 
 Options
@@ -71,8 +80,10 @@ Options
 .. code-block:: bash
 
     $ twine upload -h
-    usage: twine upload [-h] [-r REPOSITORY] [-s] [-i IDENTITY] [-u USERNAME]
-                        [-p PASSWORD] [-c COMMENT]
+
+    usage: twine upload [-h] [-r REPOSITORY] [-s] [--sign-with SIGN_WITH]
+                        [-i IDENTITY] [-u USERNAME] [-p PASSWORD] [-c COMMENT]
+                        [--config-file CONFIG_FILE] [--skip-existing]
                         dist [dist ...]
 
     positional arguments:
@@ -83,8 +94,10 @@ Options
     optional arguments:
       -h, --help            show this help message and exit
       -r REPOSITORY, --repository REPOSITORY
-                            The repository to upload the files to
+                            The repository to upload the files to (default: pypi)
       -s, --sign            Sign files to upload using gpg
+      --sign-with SIGN_WITH
+                            GPG program used to sign uploads (default: gpg)
       -i IDENTITY, --identity IDENTITY
                             GPG identity used to sign files
       -u USERNAME, --username USERNAME
@@ -93,6 +106,9 @@ Options
                             The password to authenticate to the repository with
       -c COMMENT, --comment COMMENT
                             The comment to include with the distribution file
+      --config-file CONFIG_FILE
+                            The .pypirc config file to use
+      --skip-existing       Continue uploading files if one already exists
 
 
 Resources
@@ -110,11 +126,11 @@ Contributing
 2. Make a branch off of master and commit your changes to it.
 3. Run the tests with ``tox``
 
-  - Either use ``tox`` to build against all supported Python versions (if you
-    have them installed) or use ``tox -e py{version}`` to test against a
-    sepcific version, e.g., ``tox -e py27`` or ``tox -e py34``.
-  - Always run ``tox -e pep8``
-
+   - Either use ``tox`` to build against all supported Python versions (if you
+     have them installed) or use ``tox -e py{version}`` to test against a
+     specific version, e.g., ``tox -e py27`` or ``tox -e py34``.
+   - Always run ``tox -e pep8``
+  
 4. Ensure that your name is added to the end of the AUTHORS file using the
    format ``Name <email@domain.com> (url)``, where the ``(url)`` portion is
    optional.
@@ -122,3 +138,12 @@ Contributing
 
 If you'd like to have a development environment for twine, you should create a
 virtualenv and then do ``pip install -e .`` from within the directory.
+
+
+Code of Conduct
+---------------
+
+Everyone interacting in the twine project's codebases, issue trackers, chat
+rooms, and mailing lists is expected to follow the `PyPA Code of Conduct`_.
+
+.. _PyPA Code of Conduct: https://www.pypa.io/en/latest/code-of-conduct/

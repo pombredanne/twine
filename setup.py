@@ -19,8 +19,10 @@ import twine
 
 
 install_requires = [
-    "pkginfo",
-    "requests >= 2.0",
+    "clint",
+    "pkginfo >= 1.0",
+    "requests >= 2.5.0",
+    "requests-toolbelt >= 0.5.1",
     "setuptools >= 0.7.0",
 ]
 
@@ -59,6 +61,7 @@ setup(
         "Programming Language :: Python :: 3.2",
         "Programming Language :: Python :: 3.3",
         "Programming Language :: Python :: 3.4",
+        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
@@ -68,6 +71,7 @@ setup(
     entry_points={
         "twine.registered_commands": [
             "upload = twine.commands.upload:main",
+            "register = twine.commands.register:main",
         ],
         "console_scripts": [
             "twine = twine.__main__:main",

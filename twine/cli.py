@@ -22,15 +22,17 @@ import requests
 import pkginfo
 
 import twine
+from twine._installed import Installed
 
 
 def _registered_commands(group='twine.registered_commands'):
-    return list(pkg_resources.iter_entry_points(group=group))
+    registered_commands = pkg_resources.iter_entry_points(group=group)
+    return dict((c.name, c) for c in registered_commands)
 
 
 def dep_versions():
     return 'pkginfo: {0}, requests: {1}, setuptools: {2}'.format(
-        pkginfo.Installed(pkginfo).version,
+        Installed(pkginfo).version,
         # __version__ is always defined but requests does not always have
         # PKG-INFO to read from
         requests.__version__,
@@ -49,7 +51,7 @@ def dispatch(argv):
     )
     parser.add_argument(
         "command",
-        choices=[c.name for c in registered_commands],
+        choices=registered_commands.keys(),
     )
     parser.add_argument(
         "args",
@@ -59,14 +61,6 @@ def dispatch(argv):
 
     args = parser.parse_args(argv)
 
-    command = args.command
-    for registered_command in registered_commands:
-        if registered_command.name == command:
-            break
-    else:
-        print("{0} is not a valid command.".format(command))
-        raise SystemExit(True)
-
-    main = registered_command.load()
+    main = registered_commands[args.command].load()
 
     main(args.args)
