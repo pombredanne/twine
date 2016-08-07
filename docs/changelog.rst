@@ -4,13 +4,73 @@
 Changelog
 =========
 
+* :release:`1.8.0 <2016-xx-yy>`
 
-* :release:`1.7.0 <TBD>`
+  * :feature:`201` Switch from upload.pypi.io to upload.pypi.org.
+
+  * :feature:`144` Retrieve configuration from the environment as a default.
+
+    - Repository URL will default to ``TWINE_REPOSITORY``
+
+    - Username will default to ``TWINE_USERNAME``
+
+    - Password will default to ``TWINE_PASSWORD``
+
+  * :feature:`166` Allow the Repository URL to be provided on the command-line
+    (``--repository-url``) or via an environment variable
+    (``TWINE_REPOSITORY_URL``).
+
+  * Generate SHA256 digest for all packages by default.
+
+  * :feature:`171` Generate Blake2b 256 digests for packages *if* ``pyblake2``
+    is installed. Users can use ``python -m pip install twine[with-blake2]``
+    to have ``pyblake2`` installed with Twine.
+
+  * Stop testing on Python 2.6. 2.6 support will be "best effort" until 2.0.0
+
+  * Warn users if they receive a 500 error when uploading to \*pypi.python.org
+
+* :release:`1.7.4 <2016-07-09>`
+
+  * Correct a packaging error.
+
+* :release:`1.7.3 <2016-07-08>`
+
+  * :bug:`195` Fix uploads to instances of pypiserver using
+    ``--skip-existing``. We were not properly checking the return status code
+    on the response after attempting an upload.
+
+  * Do not generate traffic to Legacy PyPI unless we're uploading to it or
+    uploading to Warehouse (e.g., pypi.io). This avoids the attempt to upload
+    a package to the index if we can find it on Legacy PyPI already.
+
+* :release:`1.7.2 <2016-07-05>`
+
+  * :bug:`189`, :bug:`191` Fix issue where we were checking the existence of
+    packages even if the user didn't specify ``--skip-existing``.
+
+* :release:`1.7.1 <2016-07-05>`
+
+  * :bug:`187` Clint was not specified in the wheel metadata as a dependency.
+
+* :release:`1.7.0 <2016-07-04>`
 
   * :feature:`142` Support ``--cert`` and ``--client-cert`` command-line flags
     and config file options for feature parity with pip. This allows users to
     verify connections to servers other than PyPI (e.g., local package
     repositories) with different certificates.
+
+  * :feature:`152` Add progress bar to uploads.
+
+  * :feature:`162` Allow ``--skip-existing`` to work for 409 status codes.
+
+  * :feature:`167` Implement retries when the CDN in front of PyPI gives us a
+    5xx error.
+
+  * :feature:`177` Switch Twine to upload to pypi.io instead of
+    pypi.python.org.
+
+  * :bug:`186` Allow passwords to have ``%``\ s in them.
 
 * :release:`1.6.5 <2015-12-16>`
 

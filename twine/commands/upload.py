@@ -55,7 +55,10 @@ def find_dists(dists):
 
 def skip_upload(response, skip_existing, package):
     filename = package.basefilename
-    msg = 'A file named "{0}" already exists for'.format(filename)
+    # NOTE(sigmavirus24): Old PyPI returns the first message while Warehouse
+    # returns the latter. This papers over the differences.
+    msg = ('A file named "{0}" already exists for'.format(filename),
+           'File already exists')
     # NOTE(sigmavirus24): PyPI presently returns a 400 status code with the
     # error message in the reason attribute. Other implementations return a
     # 409 status code. We only want to skip an upload if:
@@ -69,7 +72,8 @@ def skip_upload(response, skip_existing, package):
 
 
 def upload(dists, repository, sign, identity, username, password, comment,
-           sign_with, config_file, skip_existing, cert, client_cert):
+           sign_with, config_file, skip_existing, cert, client_cert,
+           repository_url):
     # Check that a nonsensical option wasn't given
     if not sign and identity:
         raise ValueError("sign must be given along with identity")
@@ -82,7 +86,11 @@ def upload(dists, repository, sign, identity, username, password, comment,
     )
     uploads = [i for i in dists if not i.endswith(".asc")]
 
-    config = utils.get_repository_from_config(config_file, repository)
+    config = utils.get_repository_from_config(
+        config_file,
+        repository,
+        repository_url,
+    )
 
     config["repository"] = utils.normalize_repository_url(
         config["repository"]
@@ -101,10 +109,16 @@ def upload(dists, repository, sign, identity, username, password, comment,
 
     for filename in uploads:
         package = PackageFile.from_filename(filename, comment)
+        skip_message = (
+            "  Skipping {0} because it appears to already exist".format(
+                package.basefilename)
+        )
 
-        if repository.package_is_uploaded(package) and skip_existing:
-            print("  Skipping {0} because it appears to already exist".format(
-                package.basefilename))
+        # Note: The skip_existing check *needs* to be first, because otherwise
+        #       we're going to generate extra HTTP requests against a hardcoded
+        #       URL for no reason.
+        if skip_existing and repository.package_is_uploaded(package):
+            print(skip_message)
             continue
 
         signed_name = package.signed_basefilename
@@ -125,7 +139,11 @@ def upload(dists, repository, sign, identity, username, password, comment,
                  ' Aborting...').format(config["repository"],
                                         resp.headers["location"]))
 
-        resp.raise_for_status()
+        if skip_upload(resp, skip_existing, package):
+            print(skip_message)
+            continue
+
+        utils.check_status_code(resp)
 
     # Bug 28. Try to silence a ResourceWarning by clearing the connection
     # pool.
@@ -136,8 +154,22 @@ def main(args):
     parser = argparse.ArgumentParser(prog="twine upload")
     parser.add_argument(
         "-r", "--repository",
+        action=utils.EnvironmentDefault,
+        env="TWINE_REPOSITORY",
         default="pypi",
-        help="The repository to upload the files to (default: %(default)s)",
+        help="The repository to register the package to. Can be a section in "
+             "the config file or a full URL to the repository (default: "
+             "%(default)s)",
+    )
+    parser.add_argument(
+        "--repository-url",
+        action=utils.EnvironmentDefault,
+        env="TWINE_REPOSITORY_URL",
+        default=None,
+        required=False,
+        help="The repository URL to upload the package to. This can be "
+             "specified with --repository because it will be used if there is "
+             "no configuration for the value passed to --repository."
     )
     parser.add_argument(
         "-s", "--sign",
@@ -156,11 +188,19 @@ def main(args):
     )
     parser.add_argument(
         "-u", "--username",
-        help="The username to authenticate to the repository as",
+        action=utils.EnvironmentDefault,
+        env="TWINE_USERNAME",
+        required=False, help="The username to authenticate to the repository "
+                             "as (can also be set via %(env)s environment "
+                             "variable)",
     )
     parser.add_argument(
         "-p", "--password",
-        help="The password to authenticate to the repository with",
+        action=utils.EnvironmentDefault,
+        env="TWINE_PASSWORD",
+        required=False, help="The password to authenticate to the repository "
+                             "with (can also be set via %(env)s environment "
+                             "variable)",
     )
     parser.add_argument(
         "-c", "--comment",
@@ -175,7 +215,9 @@ def main(args):
         "--skip-existing",
         default=False,
         action="store_true",
-        help="Continue uploading files if one already exists",
+        help="Continue uploading files if one already exists. (Only valid "
+             "when uploading to PyPI. Other implementations may not support "
+             "this.)",
     )
     parser.add_argument(
         "--cert",

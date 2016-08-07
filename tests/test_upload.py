@@ -20,8 +20,10 @@ import pretend
 import pytest
 
 from twine.commands import upload
-from twine import package
+from twine import package, cli
+import twine
 
+import helpers
 
 WHEEL_FIXTURE = 'tests/fixtures/twine-1.5.0-py2.py3-none-any.whl'
 
@@ -48,7 +50,8 @@ def test_ensure_if_no_wheel_files():
 
 def test_find_dists_expands_globs():
     files = sorted(upload.find_dists(['twine/__*.py']))
-    expected = ['twine/__init__.py', 'twine/__main__.py']
+    expected = [os.path.join('twine', '__init__.py'),
+                os.path.join('twine', '__main__.py')]
     assert expected == files
 
 
@@ -79,10 +82,13 @@ def test_get_config_old_format(tmpdir):
         upload.upload(dists=dists, repository="pypi", sign=None, identity=None,
                       username=None, password=None, comment=None,
                       cert=None, client_cert=None,
-                      sign_with=None, config_file=pypirc, skip_existing=False)
+                      sign_with=None, config_file=pypirc, skip_existing=False,
+                      repository_url=None,
+                      )
     except KeyError as err:
         assert err.args[0] == (
-            "Missing 'pypi' section from the configuration file.\n"
+            "Missing 'pypi' section from the configuration file\n"
+            "or not a complete URL in --repository.\n"
             "Maybe you have a out-dated '{0}' format?\n"
             "more info: "
             "https://docs.python.org/distutils/packageindex.html#pypirc\n"
@@ -124,3 +130,22 @@ def test_skip_upload_respects_skip_existing(monkeypatch):
     assert upload.skip_upload(response=response,
                               skip_existing=False,
                               package=pkg) is False
+
+
+def test_password_and_username_from_env(monkeypatch):
+    def none_upload(*args, **kwargs):
+        pass
+
+    replaced_upload = pretend.call_recorder(none_upload)
+    monkeypatch.setattr(twine.commands.upload, "upload", replaced_upload)
+    testenv = {"TWINE_USERNAME": "pypiuser",
+               "TWINE_PASSWORD": "pypipassword"}
+    with helpers.set_env(**testenv):
+        cli.dispatch(["upload", "path/to/file"])
+    cli.dispatch(["upload", "path/to/file"])
+    result_kwargs = replaced_upload.calls[0].kwargs
+    assert "pypipassword" == result_kwargs["password"]
+    assert "pypiuser" == result_kwargs["username"]
+    result_kwargs = replaced_upload.calls[1].kwargs
+    assert None is result_kwargs["password"]
+    assert None is result_kwargs["username"]

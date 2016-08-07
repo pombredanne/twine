@@ -55,7 +55,6 @@ setup(
         "Operating System :: Microsoft :: Windows",
         "Programming Language :: Python",
         "Programming Language :: Python :: 2",
-        "Programming Language :: Python :: 2.6",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.2",
@@ -79,4 +78,9 @@ setup(
     },
 
     install_requires=install_requires,
+    extras_require={
+        'with-blake2': [
+            'pyblake2',
+        ]
+    },
 )

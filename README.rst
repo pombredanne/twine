@@ -62,14 +62,19 @@ Usage
  
    .. code-block:: bash
 
-       $ twine register dist/* 
-
-
-3. Upload with twine:
+       $ # One needs to be explicit here, globbing dist/* would fail.
+       $ twine register dist/project_name-x.y.z.tar.gz
+       $ twine register dist/mypkg-0.1-py2.py3-none-any.whl
+  
+3. Upload with twine [#]_:
 
    .. code-block:: bash
 
        $ twine upload dist/*
+
+   .. [#] If you see the following error while uploading to PyPI, it probably means you need to register (see step 2)::
+
+             $ HTTPError: 403 Client Error: You are not allowed to edit 'xyz' package information
 
 4. Done!
 
@@ -117,7 +122,7 @@ Resources
 * `IRC <http://webchat.freenode.net?channels=%23pypa>`_
   (``#pypa`` - irc.freenode.net)
 * `GitHub repository <https://github.com/pypa/twine>`_
-
+* `Python Packaging User Guide <https://packaging.python.org/en/latest/distributing/>`_
 
 Contributing
 ------------

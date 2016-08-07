@@ -22,9 +22,14 @@ from requests.packages.urllib3 import util
 from requests_toolbelt.multipart import (
     MultipartEncoder, MultipartEncoderMonitor
 )
+from requests_toolbelt.utils.user_agent import user_agent
 
+import twine
 
 KEYWORDS_TO_NOT_FLATTEN = set(["gpg_signature", "content"])
+
+LEGACY_PYPI = 'https://pypi.python.org/'
+WAREHOUSE = 'https://upload.pypi.org/'
 
 
 class Repository(object):
@@ -32,6 +37,7 @@ class Repository(object):
         self.url = repository_url
         self.session = requests.session()
         self.session.auth = (username, password)
+        self.session.headers['User-Agent'] = self._make_user_agent_string()
         for scheme in ('http://', 'https://'):
             self.session.mount(scheme, self._make_adapter_with_retries())
         self._releases_json_data = {}
@@ -45,6 +51,12 @@ class Repository(object):
             status_forcelist=[500, 501, 502, 503],
         )
         return adapters.HTTPAdapter(max_retries=retry)
+
+    @staticmethod
+    def _make_user_agent_string():
+        from twine import cli
+        dependencies = cli.list_dependencies_and_versions()
+        return user_agent('twine', twine.__version__, extras=dependencies)
 
     def close(self):
         self.session.close()
@@ -144,6 +156,11 @@ class Repository(object):
         return resp
 
     def package_is_uploaded(self, package, bypass_cache=False):
+        # NOTE(sigmavirus24): Not all indices are PyPI and pypi.io doesn't
+        # have a similar interface for finding the package versions.
+        if not self.url.startswith((LEGACY_PYPI, WAREHOUSE)):
+            return False
+
         safe_name = package.safe_name
         releases = None
 
@@ -151,7 +168,8 @@ class Repository(object):
             releases = self._releases_json_data.get(safe_name)
 
         if releases is None:
-            url = 'https://pypi.python.org/pypi/{0}/json'.format(safe_name)
+            url = '{url}pypi/{package}/json'.format(package=safe_name,
+                                                    url=LEGACY_PYPI)
             headers = {'Accept': 'application/json'}
             response = self.session.get(url, headers=headers)
             releases = response.json()['releases']
